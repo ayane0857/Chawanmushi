@@ -1,0 +1,6 @@
+name: plugin
+version: '${version}'
+
+main: org.chawanmushi.plugin.Plugin
+api-version: '1.20'
+load: POSTWORLD

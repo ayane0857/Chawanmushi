@@ -1,0 +1,16 @@
+{
+  "minecraft:recipes/decorations/crafting_table": {
+    "criteria": {
+      "unlock_right_away": "2026-10-30 23:33:53 +0900"
+    },
+    "done": true
+  },
+  "minecraft:adventure/adventuring_time": {
+    "criteria": {
+      "minecraft:old_growth_pine_taiga": "2026-10-30 23:33:54 +0900",
+      "minecraft:beach": "2026-10-30 23:34:07 +0900"
+    },
+    "done": false
+  },
+  "DataVersion": 3465
+}
