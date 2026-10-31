@@ -14,6 +14,7 @@ import { Route as ActivateRouteImport } from './routes/activate'
 import { Route as DeviceRouteImport } from './routes/device'
 import { Route as ApiAuthSplatRouteImport } from './routes/api/auth/$'
 import { Route as ApiDeviceActivateRouteImport } from './routes/api/device/activate'
+import { Route as ApiDeviceResolveRouteImport } from './routes/api/device/resolve'
 
 const IndexRoute = IndexRouteImport.update({
   id: '/',
@@ -40,6 +41,11 @@ const ApiDeviceActivateRoute = ApiDeviceActivateRouteImport.update({
   path: '/api/device/activate',
   getParentRoute: () => rootRouteImport,
 } as any)
+const ApiDeviceResolveRoute = ApiDeviceResolveRouteImport.update({
+  id: '/api/device/resolve',
+  path: '/api/device/resolve',
+  getParentRoute: () => rootRouteImport,
+} as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
@@ -47,6 +53,7 @@ export interface FileRoutesByFullPath {
   '/device': typeof DeviceRoute
   '/api/auth/$': typeof ApiAuthSplatRoute
   '/api/device/activate': typeof ApiDeviceActivateRoute
+  '/api/device/resolve': typeof ApiDeviceResolveRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
@@ -54,6 +61,7 @@ export interface FileRoutesByTo {
   '/device': typeof DeviceRoute
   '/api/auth/$': typeof ApiAuthSplatRoute
   '/api/device/activate': typeof ApiDeviceActivateRoute
+  '/api/device/resolve': typeof ApiDeviceResolveRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
@@ -62,13 +70,25 @@ export interface FileRoutesById {
   '/device': typeof DeviceRoute
   '/api/auth/$': typeof ApiAuthSplatRoute
   '/api/device/activate': typeof ApiDeviceActivateRoute
+  '/api/device/resolve': typeof ApiDeviceResolveRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
   fullPaths:
-    '/' | '/activate' | '/device' | '/api/auth/$' | '/api/device/activate'
+    | '/'
+    | '/activate'
+    | '/device'
+    | '/api/auth/$'
+    | '/api/device/activate'
+    | '/api/device/resolve'
   fileRoutesByTo: FileRoutesByTo
-  to: '/' | '/activate' | '/device' | '/api/auth/$' | '/api/device/activate'
+  to:
+    | '/'
+    | '/activate'
+    | '/device'
+    | '/api/auth/$'
+    | '/api/device/activate'
+    | '/api/device/resolve'
   id:
     | '__root__'
     | '/'
@@ -76,6 +96,7 @@ export interface FileRouteTypes {
     | '/device'
     | '/api/auth/$'
     | '/api/device/activate'
+    | '/api/device/resolve'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -84,6 +105,7 @@ export interface RootRouteChildren {
   DeviceRoute: typeof DeviceRoute
   ApiAuthSplatRoute: typeof ApiAuthSplatRoute
   ApiDeviceActivateRoute: typeof ApiDeviceActivateRoute
+  ApiDeviceResolveRoute: typeof ApiDeviceResolveRoute
 }
 
 declare module '@tanstack/react-router' {
@@ -123,6 +145,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ApiDeviceActivateRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/api/device/resolve': {
+      id: '/api/device/resolve'
+      path: '/api/device/resolve'
+      fullPath: '/api/device/resolve'
+      preLoaderRoute: typeof ApiDeviceResolveRouteImport
+      parentRoute: typeof rootRouteImport
+    }
   }
 }
 
@@ -132,6 +161,7 @@ const rootRouteChildren: RootRouteChildren = {
   DeviceRoute: DeviceRoute,
   ApiAuthSplatRoute: ApiAuthSplatRoute,
   ApiDeviceActivateRoute: ApiDeviceActivateRoute,
+  ApiDeviceResolveRoute: ApiDeviceResolveRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)

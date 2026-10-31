@@ -59,6 +59,6 @@ export async function activateDeviceAccount(deviceCode: string, email: string) {
       });
     }
 
-    // await tx.delete(temp).where(eq(temp.id, pendingActivation.id));
+    await tx.delete(temp).where(eq(temp.id, pendingActivation.id));
   });
 }
