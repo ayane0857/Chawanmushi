@@ -85,3 +85,21 @@ This template comes with [Tailwind CSS](https://tailwindcss.com/) already config
 ---
 
 Built with ❤️ using React Router.
+
+## Database and authentication
+
+The app uses Prisma Client with PostgreSQL and Better Auth. Copy `.env.example`
+to `.env`, set `DATABASE_URL`, and configure the Better Auth and OIDC variables.
+Generate a strong `BETTER_AUTH_SECRET` for local or production use.
+
+From this directory, generate the client and create the database tables:
+
+```bash
+pnpm install
+pnpm db:generate
+pnpm db:migrate
+```
+
+Better Auth endpoints are served under `/api/auth/*`. The Prisma schema, including
+Better Auth's `User`, `Session`, `Account`, and `Verification` models, is in
+[`prisma/schema.prisma`](prisma/schema.prisma).

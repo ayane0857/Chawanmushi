@@ -3,19 +3,23 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "build": "react-router build",
+    "build": "prisma generate && react-router build",
     "dev": "react-router dev",
     "start": "react-router-serve ./build/server/index.js",
-    "typecheck": "react-router typegen && tsc",
-    "contract:emit": "prisma contract emit"
+    "typecheck": "prisma generate && react-router typegen && tsc",
+    "db:generate": "prisma generate",
+    "db:migrate": "prisma migrate dev"
   },
   "dependencies": {
-    "@prisma/orm-postgres": "8.0.0-rc.21",
+    "@better-auth/prisma-adapter": "^1.7.14",
+    "@prisma/adapter-pg": "^7.10.1",
+    "@prisma/client": "^7.10.1",
     "@react-router/node": "^8.5.1",
     "@react-router/serve": "^8.5.1",
     "better-auth": "^1.7.14",
     "dotenv": "^18.0.9",
     "isbot": "^5.1.36",
+    "pg": "^8.23.1",
     "react": "^19.2.8",
     "react-dom": "^19.2.8",
     "react-router": "^8.5.1"
@@ -24,8 +28,10 @@
     "@react-router/dev": "^8.5.1",
     "@tailwindcss/vite": "^4.2.2",
     "@types/node": "^22",
+    "@types/pg": "^8.23.1",
     "@types/react": "^19.2.18",
     "@types/react-dom": "^19.2.7",
+    "prisma": "^7.10.1",
     "tailwindcss": "^4.2.2",
     "typescript": "^5.9.3",
     "vite": "^8.0.3"
