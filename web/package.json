@@ -28,6 +28,7 @@
     "@tanstack/react-start": "1.169.4",
     "better-auth": "^1.5.3",
     "drizzle-orm": "^0.45.1",
+    "nitro": "3.0.261029-rc",
     "pg": "^8.16.3",
     "react": "^19.2.0",
     "react-dom": "^19.2.0",
