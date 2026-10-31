@@ -10,7 +10,7 @@ export const user = pgTable("user", {
 export const temp = pgTable("temp", {
   id: serial("id").primaryKey(),
   minecraftuuid: uuid("minecraftuuid").notNull(),
-  code: text("code").notNull(),
+  code: text("code").notNull().unique(),
   createdAt: timestamp("created_at").defaultNow().notNull(),
   expiresAt: timestamp("expires_at").notNull(),
 });
