@@ -4,11 +4,35 @@ services:
     environment:
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: p@ssw0rd
-      POSTGRES_DB: Chawanmushi
+      POSTGRES_DB: chawanmushi
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d chawanmushi"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
     ports:
       - "5432:5432"
     volumes:
       - postgres_data:/var/lib/postgresql
+
+  db-migrate:
+    build:
+      context: .
+      dockerfile: web/Dockerfile.db
+    environment:
+      DATABASE_URL: postgresql://postgres:p%40ssw0rd@postgres:5432/chawanmushi
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  adminer:
+    image: adminer:latest
+    ports:
+      - "8080:8080"
+    environment:
+      ADMINER_DEFAULT_SERVER: postgres
+    depends_on:
+      - postgres
 
 volumes:
   postgres_data:
