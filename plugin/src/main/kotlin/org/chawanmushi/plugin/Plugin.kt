@@ -1,229 +1,286 @@
 package org.chawanmushi.plugin
 
-import org.bukkit.Difficulty
+import com.google.gson.JsonParser
+import org.bukkit.Bukkit
+import org.bukkit.GameRule
 import org.bukkit.Location
 import org.bukkit.Material
 import org.bukkit.World
 import org.bukkit.WorldCreator
-import org.bukkit.configuration.file.YamlConfiguration
 import org.bukkit.entity.Player
+import org.bukkit.configuration.file.YamlConfiguration
 import org.bukkit.event.EventHandler
-import org.bukkit.event.EventPriority
 import org.bukkit.event.Listener
-import org.bukkit.event.block.BlockBreakEvent
-import org.bukkit.event.block.BlockPlaceEvent
-import org.bukkit.event.entity.EntityDamageByEntityEvent
 import org.bukkit.event.entity.EntityDamageEvent
 import org.bukkit.event.entity.FoodLevelChangeEvent
-import org.bukkit.event.inventory.InventoryClickEvent
-import org.bukkit.event.player.AsyncPlayerChatEvent
-import org.bukkit.event.player.PlayerCommandPreprocessEvent
-import org.bukkit.event.player.PlayerDropItemEvent
-import org.bukkit.event.player.PlayerInteractEvent
 import org.bukkit.event.player.PlayerJoinEvent
 import org.bukkit.event.player.PlayerMoveEvent
 import org.bukkit.event.player.PlayerQuitEvent
 import org.bukkit.generator.ChunkGenerator
 import org.bukkit.plugin.java.JavaPlugin
+import org.bukkit.scheduler.BukkitTask
 import java.io.File
-import java.util.UUID
+import java.net.URI
+import java.net.URLEncoder
+import java.net.http.HttpClient
+import java.net.http.HttpRequest
+import java.net.http.HttpResponse
+import java.nio.charset.StandardCharsets
+import java.time.Duration
 import java.util.concurrent.ConcurrentHashMap
+import java.util.Random
+import java.util.UUID
 
-/** 何も生成しない = 空っぽ(ボイド)のワールド */
-class VoidGenerator : ChunkGenerator()
+
+/** 何も生成しない(=虚無)ジェネレーター */
+class VoidGenerator : ChunkGenerator() {
+    override fun getFixedSpawnLocation(world: World, random: Random): Location =
+        Location(world, 0.5, 65.0, 0.5)
+}
 
 class Plugin : JavaPlugin(), Listener {
 
-    // 解除するための合言葉
-    private val unlockWord = "unlock"
+    private data class PlayerState(
+        val origin: Location,
+        val wasInvulnerable: Boolean,
+    )
 
-    // 1人ごとの間隔(ブロック)
-    private val spacing = 100
+    companion object {
+        const val VOID_WORLD_NAME = "void_world"
+        const val CONFIG_FILE_NAME = "chawanmushi_config.yml"
+        const val RETRY_TICKS = 200L // 10秒
+    }
 
-    // ロビーの高さ
-    private val lobbyY = 100
+    private lateinit var voidWorld: World
+    private lateinit var configFile: File
 
-    private lateinit var lobby: World
-
-    // まだ解除していないプレイヤー
-    private val locked: MutableSet<UUID> = ConcurrentHashMap.newKeySet()
-
-    // プレイヤー -> 割り当てられた区画番号
-    private val slots = ConcurrentHashMap<UUID, Int>()
-
-    // ロビーに送る前の元の場所を保存するファイル
-    private val originFile by lazy { File(dataFolder, "origins.yml") }
-    private val origins = YamlConfiguration()
+    private val tasks = HashMap<UUID, BukkitTask>()
+    private val playerStates = HashMap<UUID, PlayerState>()
+    private val lastAuthPrompts = HashMap<UUID, String>()
+    private val allowedTeleports = HashSet<UUID>()
+    private val requestsInFlight = ConcurrentHashMap.newKeySet<UUID>()
+    private val httpClient = HttpClient.newBuilder()
+        .connectTimeout(Duration.ofSeconds(5))
+        .build()
 
     override fun onEnable() {
-        dataFolder.mkdirs()
-        if (originFile.exists()) origins.load(originFile)
+        configFile = File(dataFolder, CONFIG_FILE_NAME)
+        if (!configFile.exists()) {
+            saveResource(CONFIG_FILE_NAME, false)
+        }
 
-        // 専用ワールド(ディメンション)を作成
-        lobby = WorldCreator("verify_lobby")
-            .generator(VoidGenerator())
-            .environment(World.Environment.NORMAL) // THE_END にすると見た目が変わる
-            .createWorld()!!
-        lobby.difficulty = Difficulty.PEACEFUL
-        lobby.setSpawnLocation(0, lobbyY + 1, 0)
-        lobby.time = 6000
-        lobby.setStorm(false)
+        val world = Bukkit.getWorld(VOID_WORLD_NAME)
+            ?: WorldCreator(VOID_WORLD_NAME)
+                .generator(VoidGenerator())
+                .generateStructures(false)
+                .createWorld()
+        if (world == null) {
+            logger.severe("虚無ワールドの作成に失敗しました")
+            server.pluginManager.disablePlugin(this)
+            return
+        }
+        voidWorld = world
+
+        voidWorld.apply {
+            setSpawnFlags(false, false)
+            setGameRule(GameRule.DO_MOB_SPAWNING, false)
+            setGameRule(GameRule.DO_DAYLIGHT_CYCLE, false)
+            setGameRule(GameRule.DO_WEATHER_CYCLE, false)
+            time = 6000
+        }
+
+        voidWorld.getBlockAt(0, 63, 0).type = Material.BARRIER
 
         server.pluginManager.registerEvents(this, this)
     }
 
     override fun onDisable() {
-        saveOrigins()
-        locked.clear()
-        slots.clear()
-    }
+        tasks.values.forEach { it.cancel() }
+        tasks.clear()
 
-    // ---------- 区画まわり ----------
-
-    private fun nextSlot(): Int {
-        val used = slots.values.toSet()
-        var i = 0
-        while (i in used) i++
-        return i
-    }
-
-    private fun slotLocation(slot: Int) =
-        Location(lobby, slot * spacing + 0.5, lobbyY + 1.0, 0.5)
-
-    /** その区画に5x5の足場を作る */
-    private fun buildPlatform(slot: Int) {
-        val cx = slot * spacing
-        for (dx in -2..2) for (dz in -2..2) {
-            lobby.getBlockAt(cx + dx, lobbyY, dz).type = Material.GLASS
+        if (this::voidWorld.isInitialized) {
+            server.onlinePlayers.forEach { restore(it) }
+            playerStates.clear()
         }
     }
 
-    private fun saveOrigins() {
-        try { origins.save(originFile) } catch (ex: Exception) { logger.warning("origins.yml の保存に失敗: ${ex.message}") }
+    // 認証 API の結果に応じて、認証案内またはプレイヤーの復帰を行う
+    private fun doProcess(uuid: UUID, url: String) {
+        if (!requestsInFlight.add(uuid)) return
+
+        try {
+            val baseUrl = url.trim().trimEnd('/')
+            require(baseUrl.isNotEmpty()) { "設定 URL が空です" }
+
+            val uri = URI.create("$baseUrl/api/device/resolve?uuid=$uuid")
+            val request = HttpRequest.newBuilder()
+                .uri(uri)
+                .timeout(Duration.ofSeconds(10))
+                .header("Accept", "application/json")
+                .GET()
+                .build()
+
+            logger.info("HTTPリクエスト送信: $uri")
+            httpClient.sendAsync(request, HttpResponse.BodyHandlers.ofString())
+                .whenComplete { response, error ->
+                    try {
+                        when {
+                            error != null -> {
+                                val cause = error.cause ?: error
+                                logger.warning("HTTPリクエスト失敗 (UUID: $uuid): ${cause.message}")
+                            }
+                            response == null -> logger.warning("HTTPレスポンスが空です (UUID: $uuid)")
+                            response.statusCode() !in 200..299 -> {
+                                logger.warning("HTTPエラー (UUID: $uuid, Status: ${response.statusCode()}): ${response.body()}")
+                            }
+                            else -> {
+                                logger.info("HTTPレスポンス受信 (UUID: $uuid, Status: ${response.statusCode()})")
+                                logger.info("Body: ${response.body()}")
+                                logger.info("Headers: ${response.headers()}")
+
+                                val data = try {
+                                    JsonParser.parseString(response.body()).asJsonObject
+                                } catch (parseError: Exception) {
+                                    logger.warning("JSONの解析に失敗しました (UUID: $uuid): ${parseError.message}")
+                                    return@whenComplete
+                                }
+
+                                val isRegistered = data.get("Registration")
+                                    ?.let { !it.isJsonNull && it.asBoolean }
+                                    ?: false
+
+                                if (isRegistered) {
+                                    server.scheduler.runTask(this, Runnable {
+                                        val player = Bukkit.getPlayer(uuid) ?: return@Runnable
+                                        if (restore(player)) {
+                                            tasks.remove(uuid)?.cancel()
+                                            lastAuthPrompts.remove(uuid)
+                                        }
+                                    })
+                                } else {
+                                    val code = data.get("code")
+                                        ?.let { if (it.isJsonNull) null else it.asString }
+                                    if (code.isNullOrBlank()) {
+                                        logger.warning("レスポンスに認証コードがありません (UUID: $uuid)")
+                                    } else {
+                                        val authUrl = "$baseUrl/device?code=${URLEncoder.encode(code, StandardCharsets.UTF_8)}"
+                                        server.scheduler.runTask(this, Runnable {
+                                            val player = Bukkit.getPlayer(uuid) ?: return@Runnable
+                                            if (lastAuthPrompts[uuid] == authUrl) return@Runnable
+                                            lastAuthPrompts[uuid] = authUrl
+                                            player.sendMessage("認証してください。$authUrl")
+                                        })
+                                    }
+                                }
+                            }
+                        }
+                    } catch (callbackError: Exception) {
+                        logger.warning("HTTPレスポンスの処理に失敗しました (UUID: $uuid): ${callbackError.message}")
+                    } finally {
+                        requestsInFlight.remove(uuid)
+                    }
+                }
+        } catch (error: Exception) {
+            requestsInFlight.remove(uuid)
+            logger.warning("HTTPリクエストを開始できません (UUID: $uuid): ${error.message}")
+        }
+
     }
 
-    private fun isLocked(player: Player) = locked.contains(player.uniqueId)
+    private fun voidSpawn() = Location(voidWorld, 0.5, 64.0, 0.5)
 
-    // ---------- ログイン / ログアウト ----------
+    private fun startChecking(player: Player) {
+        val uuid = player.uniqueId
+        tasks.remove(uuid)?.cancel()
+
+        // ログイン時に設定を読み込み直し、URLを取得
+        val url = YamlConfiguration.loadConfiguration(configFile).getString("url") ?: ""
+
+        tasks[uuid] = server.scheduler.runTaskTimer(this, Runnable {
+            if (!player.isOnline) {
+                tasks.remove(uuid)?.cancel()
+                return@Runnable
+            }
+
+            doProcess(uuid, url)
+
+            if (player.world != voidWorld) {
+                val state = playerStates.getOrPut(uuid) {
+                    PlayerState(player.location.clone(), player.isInvulnerable)
+                }
+                player.isInvulnerable = true
+                if (!teleport(player, voidSpawn())) {
+                    player.isInvulnerable = state.wasInvulnerable
+                }
+            }
+        }, 1L, RETRY_TICKS)
+    }
+
+    private fun restore(player: Player): Boolean {
+        val uuid = player.uniqueId
+        val state = playerStates[uuid]
+        val wasWaiting = player.world == voidWorld
+
+        if (wasWaiting) {
+            val fallback = server.worlds.firstOrNull { it != voidWorld }?.spawnLocation
+                ?: return false
+            if (!teleport(player, state?.origin ?: fallback)) return false
+        }
+
+        playerStates.remove(uuid)
+        if (state != null) {
+            player.isInvulnerable = state.wasInvulnerable
+        } else if (wasWaiting) {
+            player.isInvulnerable = false
+        }
+        return true
+    }
+
+    private fun teleport(player: Player, destination: Location): Boolean {
+        val uuid = player.uniqueId
+        allowedTeleports.add(uuid)
+        return try {
+            player.teleport(destination)
+        } finally {
+            allowedTeleports.remove(uuid)
+        }
+    }
 
     @EventHandler
-    fun onJoin(e: PlayerJoinEvent) {
-        val p = e.player
-
-        // すでにロビーにいる(ロック中に落ちた)場合は元の場所を上書きしない
-        if (p.world != lobby) {
-            origins.set("origins.${p.uniqueId}", p.location)
-            saveOrigins()
-        }
-
-        val slot = nextSlot()
-        slots[p.uniqueId] = slot
-        locked.add(p.uniqueId)
-
-        buildPlatform(slot)
-        p.teleport(slotLocation(slot))
-
-        p.sendMessage("Hello, World")
-        p.sendMessage("チャット欄に「$unlockWord」と送ると遊べるようになります。")
-    }
+    fun onJoin(e: PlayerJoinEvent) = startChecking(e.player)
 
     @EventHandler
     fun onQuit(e: PlayerQuitEvent) {
-        locked.remove(e.player.uniqueId)
-        slots.remove(e.player.uniqueId) // 区画を空けて次の人が使えるようにする
+        val p = e.player
+        tasks.remove(p.uniqueId)?.cancel()
+        lastAuthPrompts.remove(p.uniqueId)
+        playerStates[p.uniqueId]?.let { p.isInvulnerable = it.wasInvulnerable }
     }
-
-    // ---------- チャットで解除 ----------
-
-    @EventHandler(priority = EventPriority.LOWEST)
-    fun onChat(e: AsyncPlayerChatEvent) {
-        val player = e.player
-        if (!isLocked(player)) return
-
-        e.isCancelled = true
-
-        if (e.message.trim().equals(unlockWord, ignoreCase = true)) {
-            server.scheduler.runTask(this, Runnable { unlock(player) })
-        } else {
-            player.sendMessage("「$unlockWord」と送ってください。")
-        }
-    }
-
-    private fun unlock(player: Player) {
-        locked.remove(player.uniqueId)
-        slots.remove(player.uniqueId)
-
-        val key = "origins.${player.uniqueId}"
-        val origin = origins.getLocation(key)
-            ?: server.worlds.first { it != lobby }.spawnLocation
-        origins.set(key, null)
-        saveOrigins()
-
-        player.teleport(origin)
-        player.sendMessage("解除しました!自由に遊べます。")
-    }
-
-    // ---------- 未解除の間はできないこと ----------
 
     @EventHandler
     fun onMove(e: PlayerMoveEvent) {
-        if (!isLocked(e.player)) return
-        val from = e.from
-        val to = e.to
-        if (from.x != to.x || from.y != to.y || from.z != to.z) {
-            e.setTo(from.clone().apply {
-                yaw = to.yaw
-                pitch = to.pitch
-            })
+        if (e.player.uniqueId in allowedTeleports || e.from.world != voidWorld) return
+
+        val to = e.to ?: return
+        if (e.from.world == to.world &&
+            e.from.x == to.x && e.from.y == to.y && e.from.z == to.z
+        ) return
+
+        e.to = e.from.clone().apply {
+            yaw = to.yaw
+            pitch = to.pitch
         }
-    }
-
-    @EventHandler
-    fun onBreak(e: BlockBreakEvent) {
-        if (isLocked(e.player)) e.isCancelled = true
-    }
-
-    @EventHandler
-    fun onPlace(e: BlockPlaceEvent) {
-        if (isLocked(e.player)) e.isCancelled = true
-    }
-
-    @EventHandler
-    fun onInteract(e: PlayerInteractEvent) {
-        if (isLocked(e.player)) e.isCancelled = true
-    }
-
-    @EventHandler
-    fun onDrop(e: PlayerDropItemEvent) {
-        if (isLocked(e.player)) e.isCancelled = true
-    }
-
-    @EventHandler
-    fun onInventoryClick(e: InventoryClickEvent) {
-        val p = e.whoClicked as? Player ?: return
-        if (isLocked(p)) e.isCancelled = true
-    }
-
-    @EventHandler
-    fun onCommand(e: PlayerCommandPreprocessEvent) {
-        if (isLocked(e.player)) e.isCancelled = true
-    }
-
-    @EventHandler
-    fun onAttack(e: EntityDamageByEntityEvent) {
-        val damager = e.damager as? Player
-        if (damager != null && isLocked(damager)) e.isCancelled = true
     }
 
     @EventHandler
     fun onDamage(e: EntityDamageEvent) {
-        val victim = e.entity as? Player ?: return
-        if (isLocked(victim)) e.isCancelled = true
+        val p = e.entity as? Player ?: return
+        if (p.world == voidWorld) e.isCancelled = true
     }
 
     @EventHandler
     fun onHunger(e: FoodLevelChangeEvent) {
         val p = e.entity as? Player ?: return
-        if (isLocked(p)) e.isCancelled = true
+        if (p.world == voidWorld) e.isCancelled = true
     }
 }

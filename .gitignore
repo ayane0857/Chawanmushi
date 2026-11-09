@@ -57,6 +57,7 @@ generated/
 generated-sources/
 
 # Gradle wrapper should be committed
+!chawanmushi_config.yml
 !gradle-wrapper.jar
 
 # =====================================
