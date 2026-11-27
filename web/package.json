@@ -35,7 +35,7 @@
     "tailwindcss": "^4.1.18"
   },
   "devDependencies": {
-    "@biomejs/biome": "2.4.5",
+    "@biomejs/biome": "2.6.9",
     "@tanstack/devtools-vite": "0.8.6",
     "@tanstack/router-cli": "^1.132.0",
     "@types/node": "^22.10.2",
